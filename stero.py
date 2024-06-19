@@ -2,8 +2,7 @@ import cv2
 import numpy as np
 ####
 path1 = 'images/test1.jpeg'
-path2 = 'path to iamge'
-
+path2 = 'images/test2.jpeg'
 ####
 
 
@@ -15,7 +14,9 @@ img2 = cv2.imread(path2)
 # core idea: difference between two gaussian is close to normalized lapacian gaussina
 
 def getGaussianKernel(diameter, sigma):
+    
     if diameter%2 == 0:
+
         raise ValueError("Diameter must be odd numbmer")
         # Calculate the range for the kernel
     
@@ -48,7 +49,8 @@ def siftFeatures(img, scales):
 
 
 
-image_rgb = cv2.cvtColor(image, cv2.COLOR_BGR2RGB)
+image_rgb = cv2.cvtColor(img1, cv2.COLOR_BGR2RGB)
+
 print(image_rgb.shape)
 
 
