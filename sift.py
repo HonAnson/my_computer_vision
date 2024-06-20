@@ -2,7 +2,7 @@
 import cv2
 from cv2 import KeyPoint
 import numpy as np
-from numpy import trace, dot, convolve, sqrt, subtract, log, floor, stack, delete, concatenate, max
+from numpy import roll, logical_and, where, inner, exp, rad2deg, arctan2, trace, dot, convolve, sqrt, subtract, log, floor, stack, delete, concatenate, max
 from numpy.linalg import det, lstsq, norm
 from einops import rearrange
 
@@ -87,7 +87,7 @@ def isExtremum(temp1, temp2, temp3, threshold):
     temp2_unrolled = rearrange(temp2, 'm n -> (m n)')
     temp3_unrolled = rearrange(temp3, 'm n -> (m n)')
     temp2_unrolled = delete(temp2, 4)       # delete the centre pixel
-    neighbours = concatenate(temp1_unrolled, temp2_unrolled, temp3_unrolled)
+    neighbours = concatenate((temp1_unrolled, temp2_unrolled, temp3_unrolled))
 
     # calculate max and min of neighbours
     neighbours_max = np.max(neighbours)
@@ -99,10 +99,26 @@ def isExtremum(temp1, temp2, temp3, threshold):
 
 
 def getGradient(pixel_cube):
-    return
+    """ Approximate gradient with central difference formula, error has O(h^2), where h is step size
+    """
+    dx = 0.5 * (pixel_cube[1,1,2] - pixel_cube[1,1,0])
+    dy = 0.5 * (pixel_cube[1,2,1] - pixel_cube[1,0,1])
+    dz = 0.5 * (pixel_cube[2,1,1] - pixel_cube[0,1,1])
+    return np.array([dx, dy, dz])
 
 def getHessian(pixel_cube):
-    return
+    """ Approximate hessian with central difference formula, refer material for implementation
+    """
+    dxx = pixel_cube[1,1,2] - 2*pixel_cube[1,1,1] + pixel_cube[1,1,0]
+    dyy = pixel_cube[1,2,1] - 2*pixel_cube[1,1,1] + pixel_cube[1,0,1]
+    dss = pixel_cube[2,1,1] - 2*pixel_cube[1,1,1] + pixel_cube[0,1,1]
+    dxy = 0.25 * (pixel_cube[1,2,2] - pixel_cube[1,2,0] - pixel_cube[1,0,2] +pixel_cube[1,0,0])
+    dxs = 0.25 * (pixel_cube[2,1,2] - pixel_cube[2,1,0] - pixel_cube[0,1,2] +pixel_cube[0,1,0])
+    dys = 0.25 * (pixel_cube[2,2,1] - pixel_cube[2,0,1] - pixel_cube[0,2,1] +pixel_cube[0,0,1])
+
+    return np.array([[dxx, dxy, dxs],
+                     [dxy, dyy, dys], 
+                     [dxs, dys, dss]])
 
 
 
@@ -114,9 +130,10 @@ def localizeExtremumByQuadraticFit( i, j, img_idx, octave_idx,
     """
     is_outside_image = False
     image_shape = dog_image_in_octave[0].shape
+    # print(dog_image_in_octave[img_idx-1:img_idx+2])
     for attempt_idx in range(num_attempts):
-        img1, img2, img3 = dog_image_in_octave[img_idx]
-        pixel_cube = stack([img1[i-1:i+2], img2[i-1:i+2], img3[i-1:i+2]])
+        img1, img2, img3 = dog_image_in_octave[img_idx-1:img_idx+2]
+        pixel_cube = stack([img1[i-1:i+2, j-1:j+2], img2[i-1:i+2, j-1:j+2], img3[i-1:i+2, j-1:j+2]])
         gradient = getGradient(pixel_cube)
         hessian = getHessian(pixel_cube)
         extremum_update = -lstsq(hessian, gradient)[0]
@@ -128,65 +145,146 @@ def localizeExtremumByQuadraticFit( i, j, img_idx, octave_idx,
         img_idx += int(round(extremum_update[2]))
 
         # break conditions
-        if i < boarder_width or i >= image_shape[0] - boarder_width or j < boarder_width or j > image_shape[1] - boarder_width:
+        if i < boarder_width or i >= image_shape[0] - boarder_width or j < boarder_width or j >= image_shape[1] - boarder_width or img_idx > num_scales or img_idx < 1:
             is_outside_image = True
             break
-        
-        if is_outside_image:
-            return None
-        
-        if attempt_idx > num_attempts:
-            return None
-        
-        functionValueAtUpdatedExtremum = pixel_cube[1,1,1] + 0.5 * dot(gradient, extremum_update)   #learning rate of 0.5
-        if abs(functionValueAtUpdatedExtremum) * num_scales > contrast_threshold:
-            xy_hessian = hessian[:2, :2]
-            xy_hessian_trace = trace(xy_hessian)
-            xy_hessian_det = det(xy_hessian)
-            if xy_hessian_det > 0 and eigenvalue_ratio * (xy_hessian_trace**2) < ((eigenvalue_ratio + 1)**2)* xy_hessian_det:
-                # Contrast check passed -- construct and return opencv KeyPoint object
-                keypoint = KeyPoint()
-                scale = 2**octave_idx
-                keypoint.pt = ((j + extremum_update[0]) * scale, (i + extremum_update[1]) * scale)
-                keypoint.octave = octave_idx + img_idx * (2**8) / float32(num_e)
-e
+    
+    if is_outside_image:
+        return None
+    
+    if attempt_idx > num_attempts:
+        return None
+    
+    functionValueAtUpdatedExtremum = pixel_cube[1,1,1] + 0.5 * dot(gradient, extremum_update)   #learning rate of 0.5
+    if abs(functionValueAtUpdatedExtremum) * num_scales > contrast_threshold:
+        xy_hessian = hessian[:2, :2]
+        xy_hessian_trace = trace(xy_hessian)
+        xy_hessian_det = det(xy_hessian)
+        if xy_hessian_det > 0 and eigenvalue_ratio * (xy_hessian_trace**2) < ((eigenvalue_ratio + 1)**2)* xy_hessian_det:
+            # Contrast check passed -- construct and return opencv KeyPoint object
+            keypoint = KeyPoint()
+            scale = 2**octave_idx
+            keypoint.pt = ((j + extremum_update[0]) * scale, (i + extremum_update[1]) * scale)
+            keypoint.octave = octave_idx + img_idx * (2**8) + int(round((extremum_update[2]+0.5) * 255)) * (2**16)
+            keypoint.size = sigma * (2** ((img_idx + extremum_update[2]) / np.float32(num_scales))) * (2 ** (octave_idx + 1))
+            keypoint.response = abs(functionValueAtUpdatedExtremum)
+            return keypoint, img_idx
+    return None
 
 
+def getKeypointsWithOrientations(keypoint, octave_idx, gaussian_image, radius_factor = 3, num_bins = 36, peak_ratio = 0.8, scale_factor=1.5):
+    """Computer orientation of keypoint
+    """
+    keypoints_with_orientation = []
+    image_shape = gaussian_image.shape
+    scale = scale_factor * keypoint.size / np.float32(2**(octave_idx + 1))
+    radius = int(round(radius_factor*scale))
+    weight_factor = -0.5 / (scale ** 2)
+    raw_histogram = np.zeros(num_bins)
+    smooth_histogram = np.zeros(num_bins)
 
+    # we uses square neighbours
+    for i in range(-radius, radius+1):    #perhaps can change it to somethign like range(max(0, -radius), min(radius+1, somethign))
+        region_y = int(round(keypoint.pt[1] / np.float32(2**octave_idx) + i))
+        if region_y > 0 and region_y < image_shape[0] - 1:
+            for j in range(-radius, radius+1):
+                region_x = int(round(keypoint.pt[0] / np.float32(2**octave_idx) + i))
+                if region_x > 0 and region_x < image_shape[1] - 1:
+                    dx = gaussian_image[region_y, region_x+1] - gaussian_image[region_y, region_x-1]
+                    dy = gaussian_image[region_y-1, region_x] - gaussian_image[region_y+1, region_x]
+                    grad_magnitude = sqrt(dx**2+dy**2)
+                    grad_orientation = rad2deg(arctan2(dy, dx))
+                    weight = exp(weight_factor * (i**2 + j**2))         # if i and j are closer to the centre, weight is higher
+                    histogram_idx = int(round(grad_orientation * num_bins / 360.))
+                    raw_histogram[histogram_idx % num_bins] += weight * grad_magnitude
 
+    smooth_weights = np.array([1/16,1/4,6/16,1/4,1/16])
+    for n in range(num_bins):
+        arr = np.array([raw_histogram[n-2], raw_histogram[n-1], raw_histogram[n], raw_histogram[(n+1)%num_bins], raw_histogram[(n+2)%num_bins]])
+        smooth_histogram[n] = inner(arr, smooth_weights)
 
+    orientation_max = max(smooth_histogram)
+    orientation_peaks = where(logical_and(smooth_histogram > roll(smooth_histogram, 1), smooth_histogram < roll(smooth_histogram, -1)))[0]
+    for peak_index in orientation_peaks:
+        peak_value = smooth_histogram[peak_index]
+        if peak_value >= peak_ratio * orientation_max:
+            left_value = smooth_histogram[(peak_index-1) % num_bins]
+            right_value = smooth_histogram[(peak_index+1) % num_bins]
+            interpolated_peak_index = (peak_index + 0.5 * (left_value - right_value) / (left_value - 2*peak_value + right_value)) % num_bins
+            orientation = 360. - interpolated_peak_index * 360. / num_bins
+            if abs(orientation - 360.) < 10e-5:
+                orientation = 0
+            new_keypoint = KeyPoint(*keypoint.pt, keypoint.size, orientation, keypoint.response, keypoint.octave)
+            keypoints_with_orientation.append(new_keypoint)
+    
+    return keypoints_with_orientation
 
-
-
-
-    return
-
-def getScaleSpaceExtrema(gaussian_images, dog_images, num_scales, sigma, boarder_width, contrast_threshold = 0.4):
+def getScaleSpaceExtrema(gaussian_images, dog_images, num_scales, sigma, boarder_width = 5, contrast_threshold = 0.4):
     """Find pixel position in all scale spaces that are Extrema
     """
     threshold = floor(0.5 * contrast_threshold / num_scales * 255) # from reference material
-
+    keypoints = []
+    count = 0
     for octave_idx, dog_images_in_octave in enumerate(dog_images):
         for img_idx, (img1, img2, img3) in enumerate(zip(dog_images_in_octave, dog_images_in_octave[1:], dog_images_in_octave[2:])):
             i_bound = img1.shape[0] - boarder_width
             j_bound = img1.shape[1] - boarder_width
             for i in range(boarder_width, i_bound):
+                count += 1
+                if count % 100 == 0:
+                    print(count)
                 for j in range(boarder_width, j_bound):
-                    is_extremum = isExtremum(img1[i-1:i+2], img2[i-1:i+2], img3[i-1:i+2])
+                    is_extremum = isExtremum(img1[i-1:i+2, j-1:j+2], img2[i-1:i+2, j-1:j+2], img3[i-1:i+2, j-1:j+2], contrast_threshold)
                     if is_extremum:
                         localization_result = localizeExtremumByQuadraticFit(i, j, img_idx + 1, octave_idx, num_scales, dog_images_in_octave, sigma, contrast_threshold, boarder_width) 
+                        if localization_result is not None:
+                            keypoint, localized_image_idx = localization_result
+                            keypoints_with_orientations = getKeypointsWithOrientations(keypoint, octave_idx, gaussian_images[octave_idx][localized_image_idx])
+                            keypoints.append(keypoints_with_orientations)
+
+    return keypoints
+
+
+def compareKeyPoints(keypoint1, keypoint2):
+    """ Return True if keypoint1 is less than keypoint2
+    """
+    if keypoint1.pt[0] != keypoint2.pt[0]:
+        return keypoint1.pt[0] - keypoint2.pt[0]
+    if keypoint1.pt[1] != keypoint2.pt[1]:
+        return keypoint1.pt[1] - keypoint2.pt[1]
+    if keypoint1.size != keypoint2.size:
+        return keypoint2.size - keypoint1.size
+    if keypoint1.angle != keypoint2.angle:
+        return keypoint1.angle - keypoint2.angle
+    if keypoint1.response != keypoint2.response:
+        return keypoint2.response - keypoint1.response
+    if keypoint1.octave != keypoint2.octave:
+        return keypoint2.octave - keypoint1.octave
+    return keypoint2.class_id - keypoint1.class_id
+
+
+def removeDuplicateKeypoints(keypoints):
+    """Sort keypoints and remove duplicates
+    """
+
+    if len(keypoints) < 2:
+        return keypoints
+    
+    keypoints.sort(key = cmp_to_key(compareKeyPoints))
 
 
 
-    return
 
 
 
-def sift(image, sigma = 1, scales = 3, blur = 0.5, img_border_width = 5):
+
+def sift(image, sigma = 1, num_scales = 3, blur = 0.5, img_border_width = 5):
     num_octave = int(round(log(min(image.shape))/log(2) - 1)) # number of times we can half the image before it is too small
-    kernel_sizes = getKernelSizes(sigma, scales)    
+    kernel_sizes = getKernelSizes(sigma, num_scales)    
     gaussian_images = getGaussianImages(image, num_octave, kernel_sizes)
     DoG_images = getDoG(gaussian_images)
+    keypoints = getScaleSpaceExtrema(gaussian_images, DoG_images, num_scales, 5)
+
 
 
     return 
@@ -207,25 +305,30 @@ if __name__ == '__main__':
     # img1_rgb = cv2.cvtColor(img1, cv2.COLOR_BGR2RGB)
     # image_gray = cv2.cvtColor(img1, cv2.IMREAD_GRAYSCALE)
 
-    ### Display image
+    ### Parameters ###
+    num_scale = 3
+    boarder_width = 5
+    sigma = 1 
+
+
     num_octave = int(floor(log(min(img1_gray.shape))/log(2) - 3)) # number of times we can half the image before it is too small
     kernel_sizes = getKernelSizes(1, 3)
     gaussian_images = getGaussianImages(img1_gray, num_octave, kernel_sizes)
     DoG_images = getDoG(gaussian_images)
-    print(DoG_images[0].shape)
+    keypoints = getScaleSpaceExtrema(gaussian_images, DoG_images, num_scale, sigma)
     
-    output = DoG_images[2][0]
-    ##### Display image ####
-    fx = 1
-    fy = 1
-    resized_image = cv2.resize(output, None, fx=fx, fy=fy, interpolation=cv2.INTER_AREA)
-    cv2.imshow('Grayscale Image', resized_image)
-    while True:
-        if cv2.getWindowProperty('Grayscale Image', cv2.WND_PROP_VISIBLE) < 1:  
-            break
-        if cv2.waitKey(1) & 0xFF == ord('q'):  # Exit if 'q' is pressed
-            break
-    cv2.destroyAllWindows()  # Close the image window
+    # output = DoG_images[2][0]
+    # ##### Display image ####
+    # fx = 1
+    # fy = 1
+    # resized_image = cv2.resize(output, None, fx=fx, fy=fy, interpolation=cv2.INTER_AREA)
+    # cv2.imshow('Grayscale Image', resized_image)
+    # while True:
+    #     if cv2.getWindowProperty('Grayscale Image', cv2.WND_PROP_VISIBLE) < 1:  
+    #         break
+    #     if cv2.waitKey(1) & 0xFF == ord('q'):  # Exit if 'q' is pressed
+    #         break
+    # cv2.destroyAllWindows()  # Close the image window
 
 
 
