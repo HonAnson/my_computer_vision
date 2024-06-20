@@ -2,10 +2,10 @@
 import cv2
 from cv2 import KeyPoint
 import numpy as np
-from numpy import roll, logical_and, where, inner, exp, rad2deg, arctan2, trace, dot, convolve, sqrt, subtract, log, floor, stack, delete, concatenate, max
+from numpy import cos, sin, deg2rad, roll, logical_and, where, inner, exp, rad2deg, arctan2, trace, dot, convolve, sqrt, subtract, log, floor, stack, delete, concatenate, max
 from numpy.linalg import det, lstsq, norm
 from einops import rearrange
-
+from functools import cmp_to_key
 
 def gaussianBlurring(image, sigma):
     """ Apply gaussian blurring to given image
@@ -269,13 +269,57 @@ def removeDuplicateKeypoints(keypoints):
 
     if len(keypoints) < 2:
         return keypoints
-    
+
     keypoints.sort(key = cmp_to_key(compareKeyPoints))
+    unique_keypoints = [keypoints[0]]
+
+    for next_keypoint in keypoints[1:]:
+        last_unique_keypoint = unique_keypoints[-1]
+        if  last_unique_keypoint.pt[0] != next_keypoint.pt[0] or\
+            last_unique_keypoint.pt[1] != next_keypoint.pt[1] or\
+            last_unique_keypoint.size != next_keypoint.size or\
+            last_unique_keypoint.angle != next_keypoint.angle:
+            unique_keypoints.append(next_keypoint)
+    
+    return unique_keypoints
 
 
+def convertKeyPointsToImageSize(keypoints):
+    converted_keypoints = []
+    for keypoint in keypoints:
+        keypoint.pt = tuple(0.5*np.array(keypoint.pt))
+        keypoint.size*= 0.5
+        keypoint.octave = (keypoint.octave & ~255) | ((keypoint.octave - 1)& 255)
+        converted_keypoints.append(keypoint)
+    return converted_keypoints
 
 
+### Generate Descriptors ###
+def unpackOctave(keypoint):
+    octave = keypoint.octave & 255
+    layer = (keypoint.octave >> 8) & 255
+    if octave >= 128:
+        octave = octave | -128  
+    scale = 1 / np.float32(1 << octave) if octave >= 0 else np.float32(1 << -octave)
+    return octave, layer, scale
 
+def getDescriptors(keypoints, gaussian_image, window_width = 4, num_bins=8, scale_multipler=3, descriptor_max_value=0.2):
+    """Generate descriptor for each keypoint
+    """
+
+    descriptors = []
+    for keypoint in keypoints:
+        octave, layer, scale = unpackOctave(keypoint)
+        gaussian_image = gaussian_images[octave+1, layer]
+        num_rows, num_cols = gaussian_image.shape
+        point = round(scale * np.array(keypoint.pt)).astype('int')
+        bins_per_degree = num_bins / 360
+        angle = 360. - keypoint.angle
+        cos_angle = cos(deg2rad(angle))
+        sin_angle = sin(deg2rad(angle))
+
+
+    return
 
 
 def sift(image, sigma = 1, num_scales = 3, blur = 0.5, img_border_width = 5):
