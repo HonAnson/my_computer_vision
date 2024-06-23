@@ -29,6 +29,7 @@ def gaussianBlurring(image, sigma):
 
 
 
+
 def getKernelSizes(sigma, scales):
     ### generate a list of kernel size we need
     num_img_per_oct = scales + 3 #as per Ives and Mauricio's paper
@@ -130,7 +131,6 @@ def localizeExtremumByQuadraticFit( i, j, img_idx, octave_idx,
     """
     is_outside_image = False
     image_shape = dog_image_in_octave[0].shape
-    # print(dog_image_in_octave[img_idx-1:img_idx+2])
     for attempt_idx in range(num_attempts):
         img1, img2, img3 = dog_image_in_octave[img_idx-1:img_idx+2]
         pixel_cube = stack([img1[i-1:i+2, j-1:j+2], img2[i-1:i+2, j-1:j+2], img3[i-1:i+2, j-1:j+2]])
@@ -224,15 +224,11 @@ def getScaleSpaceExtrema(gaussian_images, dog_images, num_scales, sigma, boarder
     """
     threshold = floor(0.5 * contrast_threshold / num_scales * 255) # from reference material
     keypoints = []
-    count = 0
     for octave_idx, dog_images_in_octave in enumerate(dog_images):
         for img_idx, (img1, img2, img3) in enumerate(zip(dog_images_in_octave, dog_images_in_octave[1:], dog_images_in_octave[2:])):
             i_bound = img1.shape[0] - boarder_width
             j_bound = img1.shape[1] - boarder_width
             for i in range(boarder_width, i_bound):
-                count += 1
-                if count % 100 == 0:
-                    print(count)
                 for j in range(boarder_width, j_bound):
                     is_extremum = isExtremum(img1[i-1:i+2, j-1:j+2], img2[i-1:i+2, j-1:j+2], img3[i-1:i+2, j-1:j+2], contrast_threshold)
                     if is_extremum:
@@ -394,14 +390,18 @@ def getDescriptors(keypoints, gaussian_image, window_width = 4, num_bins=8, scal
 
 
 def sift(image, sigma = 1, num_scales = 3, blur = 0.5, img_border_width = 5):
-    num_octave = int(round(log(min(image.shape))/log(2) - 1)) # number of times we can half the image before it is too small
-    kernel_sizes = getKernelSizes(sigma, num_scales)    
+    num_octave = int(floor(log(min(image.shape))/log(2) - 3)) # number of times we can half the image before it is too small
+    kernel_sizes = getKernelSizes(sigma, num_scales)
+    print(kernel_sizes)
     gaussian_images = getGaussianImages(image, num_octave, kernel_sizes)
     DoG_images = getDoG(gaussian_images)
     keypoints = getScaleSpaceExtrema(gaussian_images, DoG_images, num_scales, 5)
-
-    return 
-
+    descriptors = getDescriptors(keypoints, gaussian_images)
+    output = []
+    for x in keypoints:
+        if len(x) != 0:
+            output.append(x[0])
+    return output
 
 
 if __name__ == '__main__':
@@ -415,33 +415,38 @@ if __name__ == '__main__':
     img2 = cv2.imread(path2)
 
     img1_gray = cv2.cvtColor(img1, cv2.COLOR_BGR2GRAY)
-    # img1_rgb = cv2.cvtColor(img1, cv2.COLOR_BGR2RGB)
-    # image_gray = cv2.cvtColor(img1, cv2.IMREAD_GRAYSCALE)
+    img2_gray = cv2.cvtColor(img2, cv2.COLOR_BGR2GRAY)
+
+    resized_image = cv2.resize(img1_gray, (0, 0), fx = 0.25, fy = 0.25)
+
 
     ### Parameters ###
     num_scale = 3
     boarder_width = 5
     sigma = 1 
+    image = resized_image
 
-
-    num_octave = int(floor(log(min(img1_gray.shape))/log(2) - 3)) # number of times we can half the image before it is too small
+    num_octave = int(floor(log(min(resized_image.shape))/log(2) - 3)) # number of times we can half the image before it is too small
     kernel_sizes = getKernelSizes(1, 3)
-    gaussian_images = getGaussianImages(img1_gray, num_octave, kernel_sizes)
+    gaussian_images = getGaussianImages(resized_image, num_octave, kernel_sizes)
     DoG_images = getDoG(gaussian_images)
     keypoints = getScaleSpaceExtrema(gaussian_images, DoG_images, num_scale, sigma)
-    
-    # output = DoG_images[2][0]
-    # ##### Display image ####
-    # fx = 1
-    # fy = 1
-    # resized_image = cv2.resize(output, None, fx=fx, fy=fy, interpolation=cv2.INTER_AREA)
-    # cv2.imshow('Grayscale Image', resized_image)
-    # while True:
-    #     if cv2.getWindowProperty('Grayscale Image', cv2.WND_PROP_VISIBLE) < 1:  
-    #         break
-    #     if cv2.waitKey(1) & 0xFF == ord('q'):  # Exit if 'q' is pressed
-    #         break
-    # cv2.destroyAllWindows()  # Close the image window
+
+
+    img=cv2.drawKeypoints(resized_image,keypoints,resized_image)
+
+
+    ##### Display image ####
+    xscale = 1
+    yscale = 1
+    resized_image = cv2.resize(img, None, fx=xscale, fy=yscale, interpolation=cv2.INTER_AREA)
+    cv2.imshow('Grayscale Image', resized_image)
+    while True:
+        if cv2.getWindowProperty('Grayscale Image', cv2.WND_PROP_VISIBLE) < 1:  
+            break
+        if cv2.waitKey(1) & 0xFF == ord('q'):  # Exit if 'q' is pressed
+            break
+    cv2.destroyAllWindows()  # Close the image window
 
 
 
