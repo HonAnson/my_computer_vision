@@ -1,10 +1,10 @@
 import cv2
 import numpy as np
 from sift import sift
+from random import shuffle
 
 
-
-def matchKeyPoints(keypoints1, keypoints2, descriptors1, descriptors2):
+def matchKeyPoints(descriptors1, descriptors2):
     bf = cv2.BFMatcher()
     matches = bf.knnMatch(descriptors1, descriptors2, k=2)
     good_matches = []
@@ -13,18 +13,52 @@ def matchKeyPoints(keypoints1, keypoints2, descriptors1, descriptors2):
             good_matches.append(m)
     return good_matches
 
+
 def getSteroTransformation(corrspondance):
 
 
-
     return
 
-def randsac(matches):
+def randsac(matches, num_trials):
+    best_dist = 10000000
+    best_trans = np.zeros((3,3))
+    for n in num_trials:
+        shuffle(matches)
 
-    return
+        
+        image1_points = np.zeros((8))
+        image2_points = np.zeros((8))
+
+        # write position of corrspondance into arrays
+        for i in range(4):
+            image1_idx = matches[i].queryIdx
+            image2_idx = matches[i].trainIdx
+            x1, y1 = keypoints1[image1_idx].pt
+            x2, y2 = keypoints2[image1_idx].pt
+            image1_points[2*i] = x1
+            image1_points[2*i+1] = y1
+            image2_points[2*i] = x2
+            image2_points[2*i+1] = y2
+
+
+
+        transformation = getSteroTransformation(selected_pairs)
+        transformed_points = matches[0] @ transformation
+        mean_dist = getMeanDistance(transformed_points, matches[1])
+        if mean_dist < best_dist:
+            best_dist = mean_dist
+            best_trans = transformation
+    
+    return best_trans
+
+
 
 def stero(image1, image2):
-
+    keypoints1, descriptor1 = sift(image1)
+    keypoints2, descriptor2 = sift(image2)
+    correspondance = matchKeyPoints(descriptor1, descriptor2)
+    transformation = randsac(correspondance, 100)
+    
     
     return
     
