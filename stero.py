@@ -28,51 +28,55 @@ def det(M):
     return first - second + third
 
 
-def EstimateFundamentalMatrixRandsac(matches, num_trials, keypoints1, keypoints2, threshold):
+def EstimateFundamentalMatrixRandsac(points1, points2, num_trials, threshold):
+    """ Estimate fundamental matrix with randsac using given corrspondance pairs"""
     best_inlier = 0
     best_trans = np.zeros((3,3))
+    idx = np.arange(len(points1))
     for _ in range(num_trials):
-        shuffle(matches)
+        np.random.shuffle(idx)
 
         # rewriting constraint equation from v'*f_m*v = 0 to A*f_v = 0, where f_m is fundamental matrix
         # and f_v is the unrolled fundamental matrix
         A = np.zeros((8,9))
         for i in range(8):
-            image1_idx = matches[i].queryIdx
-            image2_idx = matches[i].trainIdx
-            u1, v1 = keypoints1[image1_idx].pt
-            u2, v2 = keypoints2[image1_idx].pt
+            u1, v1 = points1[idx[i],:]
+            u2, v2 = points2[idx[i],:]
             A[i,:] = np.array([u2*u1, u2*v1, u2, v2*u1, v2*v1, v2, u1, v1, 1])  # can be worked out by expanding constraint equatin
 
         # Solve for non-trival nullspace of matrix A
         _, _, V = svd(A)
-        f_v = V[:,-1]
-        f_m = f_v.reshape((3,3))    #NOTE: rank of f_m is already 2
+        f_v = V[:,-1]               # choosing last column vector of V
+        f_m = f_v.reshape((3,3))    # NOTE: rank of f_m is already 2
         f_m = f_m / det(f_m)
 
-        # get points for evaluating randsec
-        eval_1 = np.zeros((30,3))
-        eval_2 = np.zeros((30,3))
-        for i in range(30):
-            image1_idx = matches[i+8].queryIdx
-            image2_idx = matches[i+8].trainIdx
-            eval_1[i,0], eval_1[i,1] = keypoints1[image1_idx].pt
-            eval_2[i,0], eval_2[i,1] = keypoints2[image2_idx].pt
-        eval_1[:,2] = 1
-        eval_2[:,2] = 1
-
-        transformed_points = eval_1 @ f_m
-        transformed_points = transformed_points / rearrange(transformed_points[:,2], 'a -> a 1')
-
+        # convert points into homogenous coordinates
+        eval_1, eval_2 = np.ones((len(points1),3)), np.ones((points1,3))
+        eval_1[:,0:2] = points1
+        eval_2[:,0:2] = points2
+        total = np.sum(((eval_1 @ f_m) * eval_2), axis = 1)
         # complete randsac by checking inliers
-        diff = eval_2 - transformed_points
-        dist = (diff[:,0]**2 + diff[:,1]**2)**0.5
-        inliers_count = (dist < threshold).sum()
+        inliers_count = (total < threshold).sum()
         if inliers_count > best_inlier:
             best_inlier = inliers_count
             best_trans = f_m
-            mask = dist < threshold
+            mask = total < threshold
     return best_trans, mask
+
+
+
+def compute_rectification_homographies(F, img1, img2, pts1, pts2):
+    """Compute the rectification homographies."""
+    h, w = img1.shape
+    _, H1, H2 = cv2.stereoRectifyUncalibrated(pts1, pts2, F, (w, h))
+    return H1, H2
+
+def apply_homographies(img1, img2, H1, H2):
+    """Apply the rectifying homographies to the images."""
+    h, w = img1.shape
+    rectified_img1 = cv2.warpPerspective(img1, H1, (w, h))
+    rectified_img2 = cv2.warpPerspective(img2, H2, (w, h))
+    return rectified_img1, rectified_img2
 
 
 
@@ -81,7 +85,15 @@ def stero(image1, image2):
     keypoints1, descriptor1 = sift.detectAndCompute(image1, None)
     keypoints2, descriptor2 = sift.detectAndCompute(image2, None)
     matches = matchKeyPoints(descriptor1, descriptor2)
-    fundamental_matrix, mask = EstimateFundamentalMatrixRandsac(matches, 100, keypoints1, keypoints2)
+    points1 = np.float32([keypoints1[m.queryIdx].pt for m in matches])
+    points2 = np.float32([keypoints2[m.queryIdx].pt for m in matches])
+
+
+
+    fundamental_matrix, mask = EstimateFundamentalMatrixRandsac(points1, points2, 100, 50)
+
+
+
     return fundamental_matrix, mask
     
 
