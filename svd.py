@@ -5,8 +5,6 @@ from numpy.linalg import eig
 from einops import rearrange
 
 
-
-
 def svd(M):
     """ Actually this function finds the reduced SVD of a matrix
     Decompose arbitary matrix M into U*S*V', 
@@ -52,18 +50,8 @@ def svd(M):
         for i in range(rank):
             temp = np.transpose(M)@U
             V[:,i] = temp[:,i] / singular_val[i]
-
-
     return U, S, V
     
-
-
-
-
-
-
-
-
 
 
 
