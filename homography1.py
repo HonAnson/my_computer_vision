@@ -12,7 +12,7 @@ import numpy as np
 
         
 def updatePointPos(event, x, y, flags, params):
-    global counter, circles, img1_resized, mask
+    global circles, img1_resized, mask
     if event == cv2.EVENT_LBUTTONDOWN:
         pos = np.array([x,y])  # move point closest to click to click otherwise
         diff = circles - pos
@@ -23,14 +23,13 @@ def updatePointPos(event, x, y, flags, params):
 
 
 if __name__ == "__main__":
-    circles = np.zeros((4,2), int)
-    counter = 0
-    path1 = r'images/london1.jpeg'
-    path2 = r'images/card2.jpeg'
+    ### output height and width
+    output_width = 600
+    output_height = 400
+    ### load points 
+    path1 = r'images/card1.jpeg'
     img1 = cv2.imread(path1)
-    img2 = cv2.imread(path2)
     img1_resized = cv2.resize(img1, (0,0), fx = 0.5, fy = 0.5)
-    img2_resized = cv2.resize(img2, (0,0), fx = 0.5, fy = 0.5)
     
     # initialize points position
     height, width, _ = img1_resized.shape
@@ -39,10 +38,7 @@ if __name__ == "__main__":
                         [width*2//3, height//3],
                         [width*2//3, height*2//3]])
 
-    # output height and width    
-    output_width = 400
-    output_height = 400
-    targets = np.array([[0,0],[0,height],[width,0],[width,height]])
+    targets = np.array([[0,0],[0,output_height],[output_width,0],[output_width,output_height]])
     
     
     # initialize callback reader
@@ -56,12 +52,10 @@ if __name__ == "__main__":
         cv2.imshow('image', mask)
 
         # show wrapped image
-        homo = cv2.getPerspectiveTransform(circles, targets)
-        # img_output = cv2.warpPerspective(img1_resized, homo, (output_width, output_height))
+        homo = cv2.getPerspectiveTransform(np.float32(circles), np.float32(targets))
+        img_output = cv2.warpPerspective(img1_resized, homo, (output_width, output_height))
 
-
-
-
+        cv2.imshow('output', img_output)
 
         if cv2.waitKey(20) & 0xFF == 113:
             break
