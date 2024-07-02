@@ -48,10 +48,8 @@ def EstimateFundamentalMatrixRandsac(points1, points2, num_trials, threshold):
         _, _, V = svd(A)
         f_v = V[:,-1]               # choosing last column vector of V
         f_m = f_v.reshape((3,3))    # NOTE: rank of f_m is already 2
-        f_m = f_m / det(f_m)
-
         # convert points into homogenous coordinates
-        eval_1, eval_2 = np.ones((len(points1),3)), np.ones((points1,3))
+        eval_1, eval_2 = np.ones((len(points1),3)), np.ones((len(points1),3))
         eval_1[:,0:2] = points1
         eval_2[:,0:2] = points2
         total = np.sum(((eval_1 @ f_m) * eval_2), axis = 1)
@@ -87,15 +85,14 @@ def stero(image1, image2):
     matches = matchKeyPoints(descriptor1, descriptor2)
     points1 = np.float32([keypoints1[m.queryIdx].pt for m in matches])
     points2 = np.float32([keypoints2[m.queryIdx].pt for m in matches])
-
-
-
     fundamental_matrix, mask = EstimateFundamentalMatrixRandsac(points1, points2, 100, 50)
+    fundamental_matrix /= fundamental_matrix[2,2]
+    points1 = points1[mask.ravel() == 1]
+    points2 = points2[mask.ravel() == 1]
+    H1, H2 = compute_rectification_homographies(fundamental_matrix, image1, image2, points1, points2)
 
-
-
-    return fundamental_matrix, mask
-    
+    rectified_img1, rectified_img2 = apply_homographies(image1, image2, H1, H2)
+    return rectified_img1, rectified_img2 
 
 if __name__ == '__main__':
     ####
@@ -108,12 +105,12 @@ if __name__ == '__main__':
 
     img1_gray = cv2.cvtColor(img1, cv2.COLOR_BGR2GRAY)
     img2_gray = cv2.cvtColor(img2, cv2.COLOR_BGR2GRAY)
-    f = stero(img1_gray, img2_gray)
+    rectified_img1, rectified_img2 = stero(img1_gray, img2_gray)
 
     ### Display image
     fx = 0.4
     fy = 0.4
-    resized_image = cv2.resize(img1_gray, None, fx=fx, fy=fy, interpolation=cv2.INTER_AREA)
+    resized_image = cv2.resize(rectified_img1, None, fx=fx, fy=fy, interpolation=cv2.INTER_AREA)
     cv2.imshow('Grayscale Image', resized_image)
 
     while True:
